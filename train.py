@@ -16,8 +16,8 @@ from torch.cuda.amp import autocast, GradScaler
 import commons
 import utils
 from data_utils import (
-  TextAudioLoader,
-  TextAudioCollate,
+  AudioUnitLoader,
+  AudioUnitCollate,
   DistributedBucketSampler
 )
 from models import (
@@ -31,7 +31,6 @@ from losses import (
   kl_loss
 )
 from mel_processing import mel_spectrogram_torch, spec_to_mel_torch
-from text.symbols import symbols
 
 
 torch.backends.cudnn.benchmark = True
@@ -44,7 +43,7 @@ def main():
 
   n_gpus = torch.cuda.device_count()
   os.environ['MASTER_ADDR'] = 'localhost'
-  os.environ['MASTER_PORT'] = '80000'
+  os.environ['MASTER_PORT'] = '40000'
 
   hps = utils.get_hparams()
   mp.spawn(run, nprocs=n_gpus, args=(n_gpus, hps,))
@@ -63,7 +62,7 @@ def run(rank, n_gpus, hps):
   torch.manual_seed(hps.train.seed)
   torch.cuda.set_device(rank)
 
-  train_dataset = TextAudioLoader(hps.data.training_files, hps.data)
+  train_dataset = AudioUnitLoader(hps.data.training_files, hps.data)
   train_sampler = DistributedBucketSampler(
       train_dataset,
       hps.train.batch_size,
@@ -71,17 +70,16 @@ def run(rank, n_gpus, hps):
       num_replicas=n_gpus,
       rank=rank,
       shuffle=True)
-  collate_fn = TextAudioCollate()
+  collate_fn = AudioUnitCollate()
   train_loader = DataLoader(train_dataset, num_workers=8, shuffle=False, pin_memory=True,
       collate_fn=collate_fn, batch_sampler=train_sampler)
   if rank == 0:
-    eval_dataset = TextAudioLoader(hps.data.validation_files, hps.data)
+    eval_dataset = AudioUnitLoader(hps.data.validation_files, hps.data)
     eval_loader = DataLoader(eval_dataset, num_workers=8, shuffle=False,
         batch_size=hps.train.batch_size, pin_memory=True,
         drop_last=False, collate_fn=collate_fn)
 
   net_g = SynthesizerTrn(
-      len(symbols),
       hps.data.filter_length // 2 + 1,
       hps.train.segment_size // hps.data.hop_length,
       **hps.model).cuda(rank)
